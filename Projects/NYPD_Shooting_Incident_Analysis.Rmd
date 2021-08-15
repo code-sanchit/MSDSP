@@ -1,0 +1,216 @@
+---
+title: "NYPD Shooting Incident Data Analysis Report"
+output:
+  html_document: default
+  pdf_document: default
+---
+## Objective
+The purpose of this report is to analyze the data for shooting incidents which occurred in NYC from 2006 - 2020. It will explore the nature of shooting/criminal activity and visualize the data from multiple perspectives ,derive some conclusions and identify the biases in data.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+echo_value <- TRUE
+```
+## Source The Data
+The dataset is the list of every shooting incident that occurred in NYC from 2006 - 2020. Each record represents a shooting incident in NYC and includes information about the event, the location and time of occurrence. In addition, information related to suspect and victim demographics is also included.
+
+**Download URL** : https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD
+
+
+```{r import_nypd_data,echo=echo_value,message=FALSE}
+# Read the data from URL
+library(tidyverse)
+url_in <-
+  "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nypd_cases <- read_csv(url_in)
+```
+
+## Tidy and Transform The Data
+The raw dataset needs to be cleaned up to remove the columns which are not required and filter the rows to exclude the missing data. This is a necessary step before any analysis can be done on the data to ensure that attributes with valid values are used to derive any metric or visualization.
+
+```{r tidy_data, echo=echo_value,message=FALSE}
+# Tidy and transform the data - parse datetime and remove columns which are not required
+
+nypd_cases <- nypd_cases %>%
+  mutate(OCCUR_DATE_TIME = lubridate::mdy_hms(paste(OCCUR_DATE, OCCUR_TIME, sep = ""))) %>%
+  select(
+    -c(
+      X_COORD_CD,
+      Y_COORD_CD,
+      Latitude,
+      Longitude,
+      Lon_Lat,
+      OCCUR_DATE,
+      OCCUR_TIME,
+      INCIDENT_KEY
+    )
+  ) %>%
+  select(OCCUR_DATE_TIME, everything()) %>%
+  filter(
+    VIC_SEX != 'U',
+    VIC_AGE_GROUP != 'UNKNOWN',
+    PERP_AGE_GROUP != 'UNKNOWN',
+    PERP_AGE_GROUP != '1020',
+    PERP_AGE_GROUP != '224',
+    PERP_AGE_GROUP != '940'
+  )
+```
+
+## Visualizations
+
+Below are some visualizations which capture the analysis of this data from different perspectives.
+
+1. Number of Incidents and Deaths by the year
+    * This graph captures the number of incidents and deaths for each year.
+    * We can see that there is an overall decline in the incidents from 2006-2019, however in 2020 there is a sharp jump in the number of shooting incidents.
+    * In 2020 although the number of incidents are less then 2006, they look like to be going on an upward trajectory.
+    * There is a decline in the number of deaths but the trends pretty much remains linear with minimum number of deaths happening in 2019 which coincides with the minimum of shootings. 
+  
+```{r incidents_by_year,echo=echo_value,message=FALSE}
+# Visualization #1 : x- axis = Year | y-axis = Number of incidents
+
+incidents_by_year <-
+  nypd_cases %>% mutate(YEAR = lubridate::year(OCCUR_DATE_TIME)) %>% count(YEAR) %>% rename(NUMBER_OF_CASES =n)
+
+deaths_by_year <- nypd_cases %>% filter(STATISTICAL_MURDER_FLAG==TRUE)%>% mutate(YEAR= lubridate::year(OCCUR_DATE_TIME))%>% count(YEAR)%>% rename(NUMBER_OF_DEATHS=n)
+
+incidents_deaths_by_year <-
+  incidents_by_year %>% left_join(deaths_by_year, by = c("YEAR"))
+
+legend_cases_colors <- c("NUMBER OF INCIDENTS"="black","NUMBER OF DEATHS"="red")
+
+
+incidents_deaths_by_year %>% ggplot(aes(x = YEAR)) +
+  geom_line(aes( y = NUMBER_OF_CASES,color = "NUMBER OF INCIDENTS")) +
+  geom_point(aes( y = NUMBER_OF_CASES,color = "NUMBER OF INCIDENTS")) +
+  geom_line(aes( y = NUMBER_OF_DEATHS,color = "NUMBER OF DEATHS")) +
+  geom_point(aes( y = NUMBER_OF_DEATHS,color = "NUMBER OF DEATHS")) +
+  labs(
+    title = "Annual Incidents and Deaths",
+    y = "Number of Incidents and Deaths",
+    x = "Year",
+    color = "Legend"
+  ) +
+  scale_x_continuous(breaks = seq(2006, 2020, by = 1)) +
+  scale_y_continuous(breaks = seq(0, 2100, by = 100))+
+   scale_color_manual(values = legend_cases_colors)+
+    theme(legend.position = "bottom")
+```
+
+2. Number of incidents by the hour of the day
+    * This graph captures the number of incidents at each hour of the day.
+    * The number of incidents are minimum in the morning (7 am - 9 am).
+    * As the day progresses, the number if incidents starts increasing until midnight - 1 am.
+    * After 1 am, the shootings starts to decrease.
+
+```{r incidents_by_hour,echo=echo_value,message=FALSE}
+# Visualization #2 : x- axis = Hour of the day | y-axis = Number of incidents
+
+incidents_by_hour <-
+  nypd_cases %>% mutate(HOUR = lubridate::hour(OCCUR_DATE_TIME)) %>% count(HOUR) %>% rename(NUMBER_OF_CASES =n)
+
+incidents_by_hour %>% ggplot(aes(x = HOUR, y = NUMBER_OF_CASES)) +
+  geom_line(aes(color = NUMBER_OF_CASES)) +
+  geom_point(aes(color = NUMBER_OF_CASES)) +
+  labs(title = "Total Incidents by Time of the day", y = "Number of Incidents", x =
+         "Hour (24-hr format)") +
+  theme(legend.position = "none") +
+  scale_x_continuous(breaks = seq(0, 23, by = 1)) +
+  scale_y_continuous(breaks = seq(0, 2000, by = 100))
+```
+
+3. Number of incidents by each borough and gender of the victim
+    * This graph captures the number of incidents for each boro broken down further by the gender of the victim over the period.
+    * Brooklyn has the highest number of incidents where as Staten Island has the lowest number of incidents.
+    * For each boro, number of male victims supersede the number of female victims.
+
+```{r incidents_by_boro_vic_sex,echo=echo_value,message=FALSE}
+# Visualization #3 : x- axis = BORO and VIC_SEX | y-axis =  Number of incidents
+
+incidents_by_boro_vic_sex <- nypd_cases %>% count(BORO,VIC_SEX) %>% rename(NUMBER_OF_CASES=n)
+
+incidents_by_boro_vic_sex %>% ggplot(aes(fill = VIC_SEX, y = NUMBER_OF_CASES, x =
+                                           BORO)) +
+  geom_bar(position = "stack", stat = "identity") +
+  labs(title = "Breakdown by Borough and Victim's Gender", y = "Number of Incidents", x ="Borough")
+
+```
+
+4. Number of incidents by age of the victim and perpetrator
+    * This graph captures the number of incidents for each age group of the victim broken down further by the age of the perpetrator over the period.
+    * The intent is to capture the relationship between the age groups of victims and perpetrators.
+    * The number of incidents is highest in the age group of 25-44 where majority of the perpetrators also belong to the same age group. 
+    * Similar kind of observation holds true for the age group of 18-24, where majority of the incidents are caused by the perps of the same age.
+    
+```{r incidents_by_age,echo=echo_value,message=FALSE}
+# Visualization #4 : x- axis = PERP_AGE_GROUP and  VIC_AGE_GROUP | y-axis =  Number of incidents
+
+incidents_by_age<-nypd_cases %>% count(PERP_AGE_GROUP,VIC_AGE_GROUP) %>%rename(NUMBER_OF_CASES=n)
+
+incidents_by_age %>% ggplot(aes(fill = PERP_AGE_GROUP, y = NUMBER_OF_CASES, x =
+                                  VIC_AGE_GROUP)) +
+  geom_bar(position = "stack", stat = "identity") +
+  labs(title = "Breakdown by Age Group of Victim and Perp", y = "Number of Incidents", x ="Victim's Age Group") +
+  scale_y_continuous(breaks = seq(0, 10000, by = 1000))
+```
+
+## Model - Linear Regression : Percentage of Deaths per Incident
+
+In this section, the aim is to perform a linear regression of deaths per incident as a function of number of cases from 2006 - 2020.
+
+* Deaths per incident is calculated for each year.
+* Linear model is is used to regress this percentage for the period.
+* The intent is to predict the percentage of deaths as a function of number of shooting incidents for each year using the model.
+
+```{r incidents_by_year_w_pred,echo=echo_value,message=FALSE}
+# Model - Linear Regression : Percentage of Deaths per Incident
+  
+incidents_w_deaths_percent_by_year <-
+  incidents_deaths_by_year %>% mutate(DEATHS_PER_INCIDENT =  NUMBER_OF_DEATHS / NUMBER_OF_CASES * 100)
+                                            
+mod <- lm(DEATHS_PER_INCIDENT ~ NUMBER_OF_CASES,data=incidents_w_deaths_percent_by_year)
+incidents_by_year_w_pred<-incidents_w_deaths_percent_by_year %>% mutate(PREDICTION=predict(mod))
+
+legend_colors <- c("PREDICTION"="red","ACTUAL"="blue")
+
+incidents_by_year_w_pred %>% ggplot() +
+  geom_point(aes(x = YEAR, y = DEATHS_PER_INCIDENT, color = "ACTUAL")) +
+  geom_point(aes(x = YEAR, y = PREDICTION, color = "PREDICTION")) +
+  labs(
+    title = "Percentage of Deaths per Incident",
+    y = "Percentage of Deaths",
+    x = "Year",
+    color = "Legend"
+  ) +
+  scale_x_continuous(breaks = seq(2006, 2020, by = 1)) +
+  scale_color_manual(values = legend_colors)
+```
+
+## Bias Identification
+
+
+1. Possible biases in the data
+    * The data is manually extracted as per the source website. This could be a source of selection bias or manual error in the data extraction process.
+    * The data dates back only until 2006. Since we don't have access to the data prior to 2006, the conclusions drawn here could be suffering from timing bias.
+    * Missing data - There are lots of cases where age group of victim and perpetrator is unknown. This could lead to incorrect conclusions being drawn from the data.
+    * Unavailability of occupation of the victims and perpetrators. 
+    * Unavailability of prior criminal record of the victims and perpetrators. 
+    
+2. Possible biases in the analysis
+    * Focus on the time of the day - The intent of capturing this metric was to determine which time of the day is safest. This could ignore other important factors such as police presence or number of people outside on the street during the time of the day.
+    * Focus on the age group - The intent of capturing this metric was to determine the cross section between age groups of victims and perpetrators. This data could be biased as there are missing age groups in the data itself plus it doesn't consider the interaction between age groups. More interactions between certain age groups, more are chances of untoward incidents.
+    
+## Conclusion
+
+1. This data gives an insight into the shooting incidents which happened in NYC from 2006-2020.
+2. We can see that the overall trend was decline in number of cases until 2019 and a sharp jump in 2020 which could be attributed to COVID 19. However,I might be wrong here as there is no analysis done to validate this relation.
+3. We could see that maximum number of victims are male.
+4. Early morning is safest time of the day if we consider less shooting as the indicator of safety.
+5. Number of deaths has been pretty much linear. However, the percentage of deaths varies a lot which is understandable as number of cases are not linear.
+6. A lot more could be learned from this data if we analyze it along with population and income data for these years.
+
+
+```{r session_info}
+sessionInfo()
+```
